@@ -5,6 +5,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
+#include "esphome/components/display/display_buffer.h"
 #include "esphome/core/defines.h"
 
 #ifdef USE_TIME
@@ -30,7 +31,8 @@ typedef struct _MAX6921IV18_Digit
 	uint8_t idx;
 } MAX6921IV18_Digit;
 
-class MAX6921IV18Component : public PollingComponent
+class MAX6921IV18Component : public PollingComponent,
+							 public display::DisplayBuffer
 {
   public:
 	MAX6921IV18Component() = default;
@@ -93,6 +95,30 @@ class MAX6921IV18Component : public PollingComponent
 	uint8_t strftime(const char *format, time::ESPTime time)
 		__attribute__((format(strftime, 2, 0)));
 #endif
+
+	int get_height_internal()
+	{
+		ESP_LOGD("IV18-H", __func__);
+		return 0;
+	}
+	int get_width_internal()
+	{
+		ESP_LOGD("IV18-H", __func__);
+		return 0;
+	}
+	DisplayType get_display_type()
+	{
+		ESP_LOGD("IV18-H", __func__);
+		// Perhaps should return 0;
+		return DISPLAY_TYPE_BINARY;
+	}
+
+	void draw_absolute_pixel_internal(int x, int y, Color color)
+	{
+		ESP_LOGD("IV18-H", __func__);
+		// does nothing
+		return;
+	}
 
   protected:
 	GPIOPin *enable_pin_;

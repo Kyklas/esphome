@@ -13,8 +13,6 @@ esp32:
 
 esphome:
   name: iv18clock
-  includes:
-    - src\max6921-iv18.h
   on_boot:
     then:
       - light.turn_on: 
@@ -36,6 +34,7 @@ external_components:
 
 display:
   - platform: max6921iv18
+    id: iv18
     enable_pin:
       number: 32
       inverted: true
@@ -45,9 +44,26 @@ display:
     oe_pin:
       number: 33
       inverted: true
-    lambda: |-
-      //it.print("01234567");
-      it.strftime("%H-%M-%S", id(esptime).now());
+    # lambda: |-
+    #   it.strftime("%H-%M-%S", id(esptime).now());
+    pages:
+      - id: page1
+        lambda: |-
+          //it.print("01234567");
+          it.strftime("%H-%M-%S", id(esptime).now());
+      - id: page2
+        lambda: |-
+          //it.print("01234567");
+          it.strftime("%d %b", id(esptime).now());
+
+interval:
+  - interval: 10s
+    then:
+      - display.page.show: page1
+      - component.update: iv18
+      - delay: 5s
+      - display.page.show: page2
+      - component.update: iv18
 
 # display:
 # - platform: custom
@@ -73,7 +89,7 @@ display:
 
 # Enable logging
 logger:
-  level: INFO
+  level: DEBUG
 
 
 light:
