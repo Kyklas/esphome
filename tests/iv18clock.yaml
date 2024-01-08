@@ -1,0 +1,411 @@
+# PINs:
+
+# LED1 IO2
+# LED2 IO4
+# SW_TOP    IO35
+# SW_BACk   IO34  
+# buzzer    io21
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+esphome:
+  name: iv18clock
+  includes:
+    - src\max6921-iv18.h
+  on_boot:
+    then:
+      - light.turn_on: 
+          id: red_led
+          brightness: 5%
+      - light.turn_on: 
+          id: st_led
+          brightness: 5%
+      - light.turn_on: iv18power
+      - light.turn_on:
+          id: IV18Brightness
+          brightness: 25%
+
+globals:
+  - id: iv18page
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: iv18timer
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: iv18timerEn
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: iv18dim
+    type: float
+    restore_value: no
+    initial_value: '0.25'
+
+script:
+  - id: SetIV18Dim
+    then:
+      - light.turn_on:
+          id: IV18Brightness
+          brightness: !lambda |-
+            return id(iv18dim);
+  - id: BuzShort
+    mode: restart
+    then:
+      - rtttl.play: 'two_short:d=4,o=5,b=100:16e6,16e6'
+  - id: BuzDKong
+    mode: restart
+    then:  
+      - rtttl.play: dkong:d=4,o=5,b=160:2c,8d.,d#.,c.,16b,16c6,16b,16c6,16b,16c6,16b,16c6,16b,16c6,16b,16c6,16b,2c6
+  - id: BuzTGun
+    mode: restart
+    then:
+       - rtttl.play: 'TopGun:d=4,o=4,b=31:32p,16c#,16g#,16g#,32f#,32f,32f#,32f,16d#,16d#,32c#,32d#,16f,32d#,32f,16f#,32f,32c#,16f,d#,16c#,16g#,16g#,32f#,32f,32f#,32f,16d#,16d#,32c#,32d#,16f,32d#,32f,16f#,32f,32c#,g#'
+#      - rtttl.play: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'
+  - id: IVTimerClear
+    mode: restart
+    then:
+      if:
+        condition:
+          lambda: 'return ( id(topsw).state==1 and id(backsw).state==1 ) ;'
+        then:
+          - delay: 1sec
+          - lambda: |-
+              ESP_LOGI("YML","top 1sec check");
+              if(id(topsw).state==1) {
+                id(iv18timer)=0;
+                id(iv18).update();
+              }
+
+external_components:
+  - source: esphome-component-max6921iv18
+
+display:
+  - platform: max6921iv18
+    id: iv18
+    enable_pin:  18 # PWM2
+    # enable_pin:
+    #   number: 32
+    #   inverted: true
+    clock_pin: 25
+    data_pin: 27
+    latch_pin: 26
+    oe_pin: 19 # PWM3
+    # oe_pin:
+    #   number: 33
+    #   inverted: true
+    lambda: |-
+      static int tmrEnLast=id(iv18timerEn);
+      ESPTime t=id(esptime).now();
+      static time_t end;
+
+      if(id(esptime).timestamp_now()%300==0)
+        id(iv18page)=0;
+
+      if(id(iv18timerEn) && (end<id(esptime).timestamp_now() || (end-id(esptime).timestamp_now()==10)) )
+      {
+        id(iv18page) = 1;
+      }
+
+      if(id(iv18timerEn) && (end-id(esptime).timestamp_now()>=30) && (end-id(esptime).timestamp_now())%30==0 )
+      {
+        id(iv18page) ^= 1;
+      }
+      
+      if(id(iv18page) == 0) {
+        if(!t.is_valid())
+          it.print("Updating ");
+        else 
+        {
+          if(t.second % 2==0)
+            it.strftime("%a %H.%M ", t);
+          else
+            it.strftime("%a %H%M ", t);
+          }
+      }
+      else if (id(iv18page) == 1) {
+        
+        if(tmrEnLast != id(iv18timerEn) && id(iv18timerEn)==1)
+        {
+          end = id(esptime).timestamp_now() + id(iv18timer);
+          ESP_LOGI("YML","Timer Now: %d",id(esptime).timestamp_now());
+          ESP_LOGI("YML","Timer End: %d",end);
+          id(BuzShort).execute();
+        }
+
+        if(tmrEnLast != id(iv18timerEn) && id(iv18timerEn)==0)
+        {
+          id(buz).stop();
+        }
+        
+        if(id(iv18timerEn) && end<=id(esptime).timestamp_now())
+        {          
+          it.printf("Timer End");
+          it.printf("- %4s -",(t.second % 2)?"Tmr":"End");
+          if(!id(buz).is_playing())
+            id(BuzTGun).execute();
+          
+          if(id(esptime).timestamp_now()-end>=60)
+          {
+            id(iv18timerEn)=0;
+            id(buz).stop();
+          }
+        }
+        else if(id(iv18timerEn))
+        {
+          time_t timer=end-id(esptime).timestamp_now();
+          struct tm *c_tm = ::localtime(&timer);
+          ESPTime et= ESPTime::from_c_tm(c_tm, timer);
+          it.printf("Run %02d%s%02d",et.minute,(t.second % 2)?".":"",et.second);
+        }
+        else
+        {
+          time_t t=id(iv18timer);
+          struct tm *c_tm = ::localtime(&t);
+          ESPTime et= ESPTime::from_c_tm(c_tm, t);
+          it.printf("TMR %02d.%02d",et.minute,et.second);
+        }
+
+        tmrEnLast = id(iv18timerEn);
+      }
+      else {
+        it.print("Default! ");
+      }
+
+
+# Enable logging
+logger:
+  level: INFO
+
+# power_supply:
+#   - id: iv18pwr
+#     pin: 
+#       number: 32
+#       inverted: true
+#     enable_time: 0s
+#     keep_on_time: 0.5 s
+
+light:
+  - platform: monochromatic
+    name: "Red LED"
+    output: SW_LED
+    id: red_led
+  - platform: monochromatic
+    name: "Status LED"
+    output: LED_ST
+    id: st_led
+
+  - platform: monochromatic
+    output: iv18eo
+    name: "IV18Brightness"
+    id: IV18Brightness # IV18DIM
+    # default_transition_length: 2s
+    gamma_correct: 0
+
+  - platform: binary
+    id: iv18power
+    name: "IV18Power"
+    output: iv18pwr
+
+  # - platform: partition
+  #   id: IV18Brightness
+  #   name: "IV18Brightness"
+  #   segments:
+  #     - single_light_id: IV18DIM
+  #   power_supply: iv18pwr
+  #   gamma_correct: 1
+
+output:
+  - platform: gpio
+    id: iv18pwr
+    pin: 
+      number: 32
+      inverted: true
+  - platform: ledc
+    id: LED_ST
+    pin: 
+      number: GPIO2
+      drive_strength: 20mA
+  - platform: ledc
+    id: SW_LED
+    pin: 
+      number: GPIO4
+      drive_strength: 20mA
+  - platform: ledc
+    id: buzzer
+    pin:
+       number: GPIO21
+       drive_strength: 20mA
+  - platform: ledc
+    id: iv18eo
+    pin:
+       number: GPIO33
+       inverted: true
+    frequency: 10000
+    zero_means_zero: true
+
+binary_sensor:
+  - platform: gpio
+    pin:
+#      number: GPIO35
+      number: GPIO34
+      inverted: true
+    name: "TopSW"
+    id: topsw
+    on_click:
+    - min_length: 50ms
+      max_length: 500ms
+      then:
+        - lambda: |-
+            if (id(iv18page) == 1) {
+              ESP_LOGI("YML","Timer SW ");
+              if (id(backsw).state) {
+                if(id(iv18timer)<60)
+                  id(iv18timer)+=5;
+                else if(id(iv18timer)<(5*60))
+                  id(iv18timer)+=60;
+                else
+                {
+                  int rem5=300-(id(iv18timer)%300);
+                  // rem5=rem5?rem5:300;
+                  int rem11=660-(id(iv18timer)%660);
+                  // rem11=rem11?rem11:660;
+                  id(iv18timer)+=min(rem5,rem11);
+                }
+
+              } else {
+                // Start / Stop
+                id(iv18timerEn)^=1;
+              }
+              // Refresh
+              id(iv18).update();
+            }
+    on_state:
+      then:
+        - script.execute: IVTimerClear
+
+
+            
+
+# - lambda: |-
+#     if (id(iv18dim) < 0.10)
+#       id(iv18dim) = 0.10;
+#     else if(id(iv18dim) < 0.25)
+#       id(iv18dim) = 0.25;
+#     else if(id(iv18dim) < 0.50)
+#       id(iv18dim) = 0.5;
+#     else if(id(iv18dim) < 1)
+#       id(iv18dim) = 1;
+#     else if(id(iv18dim) == 1)
+#       id(iv18dim) = 0.0117;
+#     ESP_LOGI(TAG, "Set Dim: %f", id(iv18dim));
+#     id(SetIV18Dim).execute();
+
+  - platform: gpio
+    pin:
+#      number: GPIO34
+      number: GPIO35
+      inverted: true
+    name: "BackSW"
+    id: backsw
+    on_click:
+    - min_length: 50ms
+      max_length: 500ms
+      then:
+        - lambda: |-
+            id(iv18page) = (id(iv18page)+1)%3;
+            ESP_LOGI("YML","Back SW : %d",id(iv18page));
+            id(iv18).update();
+
+
+# api:
+#   encryption:
+#     key: !secret light_api_key
+#   services:
+#     - service: play_buzzer
+#       variables:
+#         song_str: string
+#       then:
+#         - rtttl.play:
+#             rtttl: !lambda 'return song_str;'
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+web_server:
+  port: 80
+
+time:
+  - platform: sntp
+    id: esptime
+    on_time:
+      - seconds: /10
+        hours: 23,0-7
+        then:
+          - light.turn_on:
+              id: IV18Brightness
+              brightness: 1.17%
+      - seconds: /10
+        hours: 8-21
+        then:
+          - light.turn_on:
+              id: IV18Brightness
+              brightness: 80%
+      - seconds: /10
+        hours: 22
+        then:
+          - light.turn_on:
+              id: IV18Brightness
+              brightness: 20%
+
+
+# # ota:
+# #   password: !secret light_ota_password
+
+# sensor:
+#   - platform: wifi_signal
+#     name: "WiFi Signal Sensor"
+#     update_interval: 60s
+
+rtttl:
+  output: buzzer
+  id: buz
+  on_finished_playback:
+    - logger.log: 'Song ended!'
+
+# binary_sensor:
+#   - platform: gpio
+#     pin:
+#       number: GPIO35
+#       inverted: true
+#     name: "TopSW"
+#     on_press:
+#       then:
+#         - rtttl.play: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'
+#         - light.turn_on:
+#             id: red_led
+#             brightness: 80%
+#         - delay: 2s
+#         - light.turn_on:
+#             id: red_led
+#             brightness: 20%
+#   - platform: gpio
+#     pin:
+#       number: GPIO34
+#       inverted: true
+#     name: "BackSW"
+#     on_press:
+#       then:
+#         - rtttl.play: 'mission_imp:d=16,o=6,b=95:32d,32d#,32d,32d#,32d,32d#,32d,32d#,32d,32d,32d#,32e,32f,32f#,32g,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,a#,g,2d,32p,a#,g,2c#,32p,a#,g,2c,a#5,8c,2p,32p,a#5,g5,2f#,32p,a#5,g5,2f,32p,a#5,g5,2e,d#,8d'
+#         - light.turn_on:
+#             id: red_led
+#             brightness: 80%
+#         - delay: 2s
+#         - light.turn_on:
+#             id: red_led
+#             brightness: 20%
